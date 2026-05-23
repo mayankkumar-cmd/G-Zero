@@ -1,0 +1,17 @@
+# Python virtual environment
+venv/
+
+# PyInstaller build files and outputs
+build/
+dist/
+*.spec
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Editor configs
+.vscode/
+.idea/
