@@ -1,16 +1,16 @@
-# G-Zero: Lightweight Logitech G304/G305 DPI Controller
+# G-Zero: Universal Logitech Gaming Mouse DPI & Battery Controller
 
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-0078D4?style=flat-square&logo=windows&logoColor=white)](https://microsoft.com)
 [![Language: Python](https://img.shields.io/badge/Language-Python-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Framework: Tkinter](https://img.shields.io/badge/Framework-Tkinter-4B8BBE?style=flat-square&logo=desktop&logoColor=white)](https://docs.python.org/3/library/tkinter.html)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 
-**G-Zero** is a modern dark-themed desktop utility for Windows designed to control the hardware DPI of the **Logitech G304 and G305 Lightspeed** gaming mice with **0% background CPU and RAM overhead**.
+**G-Zero** is a modern dark-themed, ultra-lightweight Windows utility designed to control the hardware settings, active DPI, and battery tracking of **all Logitech gaming mice** that support the HID++ 2.0 protocol with **0% background CPU and RAM overhead**.
 
-> [!WARNING]
-> **Compatibility:** This tool is strictly compatible with the **Logitech G304** and **Logitech G305 Lightspeed** wireless gaming mice. It does not support any other Logitech models or third-party hardware.
+> [!NOTE]
+> **Universal Compatibility:** G-Zero is model-agnostic. It dynamically queries your mouse's internal feature table over USB to fetch its specifications, supporting everything from wired gaming mice to wireless Lightspeed transceivers (such as the G304, G305, G Pro Wireless, GPX Superlight, G502, G703, and more).
 
-Unlike the official **Logitech G HUB** software (which occupies over 400 MB of space, connects to the cloud, and runs background telemetry processes), **G-Zero** connects directly to the mouse hardware over USB, applies your custom settings instantly, and can be closed immediately. The mouse's physical onboard memory remembers your settings.
+Unlike the official **Logitech G HUB** software (which occupies over 400 MB of space, runs persistent background telemetry, and consumes system resources), **G-Zero** connects directly to the mouse hardware over USB, applies your custom settings instantly, and can be closed immediately. The mouse remembers the configurations in its physical onboard memory.
 
 ---
 
@@ -22,11 +22,11 @@ You do not need to install Python or set up dependencies. Go to the [GitHub Rele
 
 ## Features
 
-- 🔋 **Zero Background Overhead:** Configure your DPI in seconds and exit. The mouse retains the active settings at the hardware level.
-- 🎛️ **DPI Slider:** Snaps and applies DPI settings directly on mouse release (ranges from `200` to `12000` in steps of `50`).
-- ⚡ **Instant Presets:** Quick-select buttons for standard sensitivities (`400`, `800`, `1600`, `3200` DPI).
-- 🔄 **Non-Blocking Background Polling:** The USB communication operates on a separate background thread with hardware locks, ensuring the GUI remains fully responsive even if the mouse goes to sleep.
-- 💡 **Wake Warning:** Automated on-screen status indicator informing you if your wireless mouse has gone to sleep.
+- 🔋 **Zero Background Overhead:** Configure your settings in seconds and exit. The mouse retains the active configurations at the hardware level.
+- 🎛️ **Adaptive DPI Slider:** Dynamically scales its bounds based on your sensor's hardware limits. Automatically supports up to `12000` DPI for standard sensors and up to `25600` DPI for high-end HERO 16K/25K sensors.
+- 🔋 **Dynamic Battery Status (Feature `0x1000`):** Real-time percentage readouts and power states (Discharging, Recharging, Complete) mapped via a vector battery canvas that changes color reactively.
+- 🏷️ **Onboard Name & Telemetry (Features `0x0005` & `0x0003`):** Dynamically resolves your friendly product name and firmware prefixes/builds from the mouse ROM.
+- 🔄 **Non-Blocking Background Polling:** USB communication operates on a separate background thread with hardware locks. Throttles battery queries to once every 30 seconds to conserve wireless battery.
 
 ---
 
@@ -35,9 +35,9 @@ You do not need to install Python or set up dependencies. Go to the [GitHub Rele
 ```
 G-Zero/
 ├── main.py            # High-DPI entry point (initializes Tkinter)
-├── gui.py             # Modern flat dark card layout, button animations, and event hooks
-├── hidpp.py           # Low-level Logitech HID++ 2.0 communication, packet framing, and USB writes
-├── requirements.txt   # Project dependencies list
+├── gui.py             # Flat dark layout, button animations, vector canvas, and updates
+├── hidpp.py           # HID++ 2.0 dynamic feature lookups, packet framing, and raw USB I/O
+├── requirements.txt   # Dependencies list
 ├── .gitignore         # Excluded files list for Git
 └── README.md          # Documentation
 ```
@@ -48,7 +48,7 @@ G-Zero/
 
 ### Prerequisites
 - **Python 3.10+** (must be installed on Windows)
-- **G304/G305 Lightspeed USB Receiver** plugged in
+- **Logitech Gaming Mouse** plugged in (wired or wireless receiver)
 
 ### Setup
 
@@ -75,16 +75,16 @@ G-Zero/
    ```
 
 > [!IMPORTANT]
-> **Keep Moving the Mouse:** Logitech wireless gaming mice go into a low-power sleep state to save battery. While launching the app or applying DPI, keep moving the mouse slightly to ensure the Lightspeed receiver can route the command packets to the peripheral hardware.
+   **Wireless Sleep Cycle:** Wireless mice go to sleep after idle periods. While launching the app or applying DPI, keep moving the mouse slightly to ensure the Lightspeed receiver can route the command packets to the peripheral hardware.
 
 ---
 
 ## How It Works: Logitech HID++ 2.0 Protocol
 
 **G-Zero** replicates the core protocol behavior of open-source drivers like `libratbag`:
-1. It connects to the Lightspeed receiver (`0xc53f`) on Windows on the raw vendor-defined channel: **Interface 2, Usage Page 0xFF00, Usage 0x02**.
-2. It queries the **HID++ 2.0 Root Feature Table (`0x0000`)** to dynamically locate the index of **Adjustable DPI (`0x2201`)** (which maps dynamically to `0x1A` on typical firmware revisions).
-3. It sends standard **HID++ 2.0 Long Packets (`0x11`, 20 bytes)** using **Function 2 (`0x21`)** to query the active hardware DPI and **Function 3 (`0x31`)** to write new DPI settings instantly.
+1. It connects to the Logitech transceiver on Windows on the raw vendor-defined channel: **Usage Page 0xFF00, Usage 0x02**.
+2. It queries the **HID++ 2.0 Root Feature Table (`0x0000`)** to dynamically locate the indices of requested features (e.g., `0x2201` for Adjustable DPI, `0x1000` for battery status, `0x0003` for firmware version).
+3. It sends standard **HID++ 2.0 Long Packets (`0x11`, 20 bytes)** to read and write parameters directly to the hardware.
 
 ---
 

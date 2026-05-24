@@ -58,16 +58,16 @@ class HIDPP20Device:
         """Attempts to open the control interface and query dynamic feature indices."""
         with self.lock:
             try:
-                # Find the receiver control interface if path is not provided
+                # Find any Logitech device with standard HID++ 2.0 endpoint (Usage Page 0xFF00, Usage 0x02)
                 if not self.path:
                     for device in hid.enumerate():
                         if device['vendor_id'] == LOGITECH_VID:
-                            if device['interface_number'] == 2 and device['usage_page'] == 0xFF00 and device['usage'] == 0x02:
+                            if device['usage_page'] == 0xFF00 and device['usage'] == 0x02:
                                 self.path = device['path']
                                 break
                 
                 if not self.path:
-                    raise ConnectionError("G304/G305 receiver control interface not found.")
+                    raise ConnectionError("Logitech HID++ 2.0 device control interface not found.")
 
                 self.device = hid.device()
                 self.device.open_path(self.path)
