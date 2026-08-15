@@ -16,9 +16,9 @@ class GZeroGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("G-Zero DPI Controller")
-        self.root.geometry("480x460")
+        self.root.geometry("480x530")
         self.root.resizable(False, False)
-        self.version = "v0.3"
+        self.version = "v0.4"
         self.update_url = None
         self.update_tag = None
 
@@ -46,6 +46,7 @@ class GZeroGUI:
         self.is_dragging = False
         self.cached_fw_info = None
         self.cached_device_name = None
+        self.cached_report_rate = None
 
         # Setup modern styles and draw components
         self.setup_styles()
@@ -161,7 +162,8 @@ class GZeroGUI:
 
         bounds_frame = tk.Frame(slider_frame, bg=self.colors["card"])
         bounds_frame.pack(fill="x", pady=4)
-        tk.Label(bounds_frame, text="200 DPI", font=("Helvetica", 8), fg=self.colors["text_secondary"], bg=self.colors["card"]).pack(side="left")
+        self.min_bound_label = tk.Label(bounds_frame, text="200 DPI", font=("Helvetica", 8), fg=self.colors["text_secondary"], bg=self.colors["card"])
+        self.min_bound_label.pack(side="left")
         self.max_bound_label = tk.Label(bounds_frame, text="12000 DPI", font=("Helvetica", 8), fg=self.colors["text_secondary"], bg=self.colors["card"])
         self.max_bound_label.pack(side="right")
 
@@ -182,6 +184,25 @@ class GZeroGUI:
             btn.pack(side="left", expand=True, fill="x", padx=4)
             btn.configure(state="disabled")
             self.preset_buttons.append(btn)
+
+        # 4b. Polling Rate section
+        self.polling_rate_frame = tk.Frame(self.card, bg=self.colors["card"], pady=8)
+        self.polling_rate_frame.pack(fill="x", padx=20)
+
+        polling_rate_label = tk.Label(self.polling_rate_frame, text="POLLING RATE", font=("Helvetica", 8, "bold"), fg=self.colors["text_secondary"], bg=self.colors["card"])
+        polling_rate_label.pack(anchor="w", pady=5)
+
+        polling_layout_frame = tk.Frame(self.polling_rate_frame, bg=self.colors["card"])
+        polling_layout_frame.pack(fill="x")
+
+        self.polling_rate_values = [8, 4, 2, 1]  # 125, 250, 500, 1000 Hz
+        self.polling_rate_buttons = []
+        for val in self.polling_rate_values:
+            hz_str = "1000 Hz" if val == 1 else "500 Hz" if val == 2 else "250 Hz" if val == 4 else "125 Hz"
+            btn = self.create_modern_button(polling_layout_frame, hz_str, lambda v=val: self.apply_report_rate(v))
+            btn.pack(side="left", expand=True, fill="x", padx=4)
+            btn.configure(state="disabled")
+            self.polling_rate_buttons.append(btn)
 
         # 5. Telemetry diagnostics row
         telemetry_frame = tk.Frame(self.card, bg=self.colors["card"])
@@ -257,8 +278,7 @@ class GZeroGUI:
         self.apply_dpi(self.dpi_var.get())
 
     def on_slider_move(self, val):
-        dpi = int(float(val))
-        snapped_dpi = round(dpi / 50) * 50
+        snapped_dpi = self.mouse.clamp_dpi(float(val))
         self.dpi_var.set(snapped_dpi)
         self.dpi_val_label.configure(text=f"{snapped_dpi}")
 
@@ -321,13 +341,10 @@ class GZeroGUI:
         self.draw_status_dot(self.colors["success"])
         self.status_label.configure(text="Connected", fg=self.colors["success"])
 
-        # Dynamically scale sensor bounds based on active DPI (supports high-end HERO 16K/25K sensors)
-        if dpi > 12000:
-            self.slider.configure(to=25600)
-            self.max_bound_label.configure(text="25600 DPI")
-        else:
-            self.slider.configure(to=12000)
-            self.max_bound_label.configure(text="12000 DPI")
+        # Scale slider bounds to the range the sensor itself reported (HERO 16K/25K included)
+        self.slider.configure(from_=self.mouse.dpi_min, to=self.mouse.dpi_max)
+        self.min_bound_label.configure(text=f"{self.mouse.dpi_min} DPI")
+        self.max_bound_label.configure(text=f"{self.mouse.dpi_max} DPI")
 
         if not self.is_dragging:
             self.dpi_val_label.configure(text=f"{dpi}", fg=self.colors["text"])
@@ -342,6 +359,16 @@ class GZeroGUI:
         )
         for btn in self.preset_buttons:
             btn.configure(state="normal", fg=self.colors["text"])
+
+        # Update Polling Rate UI
+        if self.mouse.report_rate_feature_idx:
+            for btn in self.polling_rate_buttons:
+                btn.configure(state="normal")
+            if self.cached_report_rate:
+                self.update_polling_rate_buttons_ui(self.cached_report_rate)
+        else:
+            for btn in self.polling_rate_buttons:
+                btn.configure(state="disabled", bg=self.colors["bg"], fg=self.colors["text_secondary"])
 
         # Clean and shorten name for UI layout safety
         cleaned_name = self.clean_device_name(device_name)
@@ -386,6 +413,9 @@ class GZeroGUI:
         for btn in self.preset_buttons:
             btn.configure(state="disabled", fg=self.colors["text_secondary"])
 
+        for btn in self.polling_rate_buttons:
+            btn.configure(state="disabled", bg=self.colors["bg"], fg=self.colors["text_secondary"])
+
         # Reset battery and firmware displays
         self.battery_pct_label.configure(text="--%", fg=self.colors["text_secondary"])
         self.battery_state_label.configure(text="---", fg=self.colors["text_secondary"])
@@ -393,9 +423,8 @@ class GZeroGUI:
         self.telemetry_label.configure(text="SYS: G304/G305 | FW: Unknown | PROT: HID++ 2.0", fg=self.colors["text_secondary"])
 
     def apply_dpi(self, dpi_val):
-        dpi_val = int(dpi_val)
-        dpi_val = round(dpi_val / 50) * 50
-        dpi_val = max(200, min(12000, dpi_val))
+        # Snap against the sensor's real capabilities; set_dpi re-clamps authoritatively
+        dpi_val = self.mouse.clamp_dpi(dpi_val)
 
         self.dpi_val_label.configure(text=f"{dpi_val}")
         self.dpi_var.set(dpi_val)
@@ -425,12 +454,15 @@ class GZeroGUI:
                 try:
                     dpi = self.mouse.get_dpi()
 
-                    # Fetch dynamic device name and firmware info once per connection
+                    # Fetch dynamic device name, firmware info, and report rate once per connection
                     if not self.cached_device_name:
                         self.cached_device_name = self.mouse.get_device_name()
 
                     if not self.cached_fw_info:
                         self.cached_fw_info = self.mouse.get_firmware_info()
+
+                    if self.cached_report_rate is None:
+                        self.cached_report_rate = self.mouse.get_report_rate()
 
                     # Query battery status every 30 seconds to minimize receiver duty cycle
                     if poll_counter % 30 == 0 or self.last_battery_info is None:
@@ -444,6 +476,7 @@ class GZeroGUI:
                     self.cached_fw_info = None
                     self.cached_device_name = None
                     self.last_battery_info = None
+                    self.cached_report_rate = None
                     poll_counter = 0
                     self.root.after(0, lambda: self.update_ui_disconnected("Connecting to mouse..."))
             else:
@@ -455,6 +488,7 @@ class GZeroGUI:
                         self.cached_device_name = self.mouse.get_device_name()
                         self.cached_fw_info = self.mouse.get_firmware_info()
                         self.last_battery_info = self.mouse.get_battery_status()
+                        self.cached_report_rate = self.mouse.get_report_rate()
                         poll_counter = 1
                         self.root.after(0, lambda d=dpi, b=self.last_battery_info, f=self.cached_fw_info, n=self.cached_device_name: self.update_ui_connected(d, b, f, n))
                     else:
@@ -614,3 +648,59 @@ class GZeroGUI:
         except Exception as e:
             messagebox.showerror("Update Error", f"Failed to execute dynamic self-updater: {e}")
             self.update_btn.configure(state="normal", text="✨ Relaunch Ready")
+
+    def update_polling_rate_buttons_ui(self, active_val):
+        for val, btn in zip(self.polling_rate_values, self.polling_rate_buttons):
+            if btn["state"] == "disabled":
+                continue
+            
+            if val == active_val:
+                # Active button: highlighted in Accent (Glowing Cyan)
+                btn.configure(
+                    bg=self.colors["accent"],
+                    fg=self.colors["bg"],
+                    activebackground=self.colors["accent"],
+                    activeforeground=self.colors["bg"]
+                )
+                # Rebind Enter/Leave to keep accent color on active button
+                btn.bind("<Enter>", lambda e, b=btn: b.configure(bg=self.colors["accent_hover"]) if b["state"] != "disabled" else None)
+                btn.bind("<Leave>", lambda e, b=btn: b.configure(bg=self.colors["accent"]) if b["state"] != "disabled" else None)
+            else:
+                # Inactive button: normal dark styling
+                btn.configure(
+                    bg=self.colors["bg"],
+                    fg=self.colors["text"],
+                    activebackground=self.colors["accent"],
+                    activeforeground=self.colors["bg"]
+                )
+                # Standard Enter/Leave bindings
+                btn.bind("<Enter>", lambda e, b=btn: b.configure(bg=self.colors["border"]) if b["state"] != "disabled" else None)
+                btn.bind("<Leave>", lambda e, b=btn: b.configure(bg=self.colors["bg"]) if b["state"] != "disabled" else None)
+
+    def apply_report_rate(self, rate_ms):
+        # Temporarily disable all polling rate buttons during apply to prevent spamming
+        for btn in self.polling_rate_buttons:
+            btn.configure(state="disabled")
+        
+        threading.Thread(target=self.apply_report_rate_thread, args=(rate_ms,), daemon=True).start()
+
+    def apply_report_rate_thread(self, rate_ms):
+        try:
+            confirmed_rate = self.mouse.set_report_rate(rate_ms)
+            self.cached_report_rate = confirmed_rate
+            self.root.after(0, lambda: self.update_report_rate_success(confirmed_rate))
+        except Exception as e:
+            # On failure, revert buttons back to active state and show warning
+            self.root.after(0, lambda err=e: self.update_report_rate_failure(err))
+
+    def update_report_rate_success(self, confirmed_rate):
+        for btn in self.polling_rate_buttons:
+            btn.configure(state="normal")
+        self.update_polling_rate_buttons_ui(confirmed_rate)
+
+    def update_report_rate_failure(self, err):
+        for btn in self.polling_rate_buttons:
+            btn.configure(state="normal")
+        if self.cached_report_rate:
+            self.update_polling_rate_buttons_ui(self.cached_report_rate)
+        messagebox.showwarning("Connection Warning", str(err))
